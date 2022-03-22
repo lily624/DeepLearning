@@ -1,0 +1,404 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "b25d856b",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from numpy import *\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "from math import log\n",
+    "import operator"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "c33aa12e",
+   "metadata": {},
+   "source": [
+    "**包括未剪枝CART决策树、预剪枝CART决策树以及后剪枝决策树**"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "fb3522ce",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "(17, 10)"
+      ]
+     },
+     "execution_count": 2,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "df = pd.read_csv(\"watermelon.csv\")\n",
+    "df.shape"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "c1104698",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# calculate the Gini index\n",
+    "def calcGini(dataset):\n",
+    "    numEntries = len(dataset)\n",
+    "    labelCount = {}\n",
+    "    # create a dictionary to store all possible labels\n",
+    "    for featVec in dataset:\n",
+    "        currentLabel = featVec[-1]\n",
+    "        if currentLabel not in labelCount.keys():\n",
+    "            labelCount[currentLabel] = 0\n",
+    "        labelCount[currentLabel] += 1\n",
+    "    Gini = 1.0\n",
+    "    for key in labelCount:\n",
+    "        prob = float(labelCount[key])/numEntries\n",
+    "        Gini -= prob * prob\n",
+    "    return Gini"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "dab6438f",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def splitdataset(dataset, axis, value):\n",
+    "    retdataset = []\n",
+    "    for featVec in dataset:\n",
+    "        if featVec[axis] == value:\n",
+    "            reducedfeatvec = featVec[:axis]\n",
+    "            reducedfeatvec.extend(featVec[axis+1:])\n",
+    "            retdataset.append(reducedfeatvec)\n",
+    "    return retdataset"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "b5421699",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def splitContinuousDataSet(dataset,axis,value,direction):\n",
+    "    retDataSet=[]\n",
+    "    for featVec in dataset:\n",
+    "        if direction==0:\n",
+    "            if featVec[axis]>value:\n",
+    "                reducedFeatVec=featVec[:axis]\n",
+    "                reducedFeatVec.extend(featVec[axis+1:])\n",
+    "                retDataSet.append(reducedFeatVec)\n",
+    "        else:\n",
+    "            if featVec[axis]<=value:\n",
+    "                reducedFeatVec=featVec[:axis]\n",
+    "                reducedFeatVec.extend(featVec[axis+1:])\n",
+    "                retDataSet.append(reducedFeatVec)\n",
+    "    return retDataSet"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "8be43909",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#Choose the best feature to split the dataset\n",
+    "def chooseBestFeatureToSplit(dataset,labels):\n",
+    "    numFeatures=len(dataset[0])-1\n",
+    "    bestGiniIndex=100000.0\n",
+    "    bestFeature=-1\n",
+    "    bestSplitDict={}\n",
+    "    for i in range(numFeatures):\n",
+    "        featList=[example[i] for example in dataset]\n",
+    "        #for continuous features \n",
+    "        if type(featList[0]).__name__=='float' or type(featList[0]).__name__=='int':\n",
+    "            #generate n-1 candidate seperate point\n",
+    "            sortfeatList=sorted(featList)\n",
+    "            splitList=[]\n",
+    "            for j in range(len(sortfeatList)-1):\n",
+    "                splitList.append((sortfeatList[j]+sortfeatList[j+1])/2.0)\n",
+    "            \n",
+    "            bestSplitGini = 10000\n",
+    "            slen=len(splitList)\n",
+    "            \n",
+    "            # get the sharnnon information at seperate point j and record the best split point\n",
+    "            for j in range(slen):\n",
+    "                value=splitList[j]\n",
+    "                newGiniIndex=0.0\n",
+    "                subDataSet0=splitContinuousDataSet(dataset,i,value,0)\n",
+    "                subDataSet1=splitContinuousDataSet(dataset,i,value,1)\n",
+    "                prob0=len(subDataSet0)/float(len(dataset))\n",
+    "                newEntropy+=prob0*calshannonEnt(subDataSet0)\n",
+    "                prob1=len(subDataSet1)/float(len(dataset))\n",
+    "                newGiniIndex+=prob1*calcGini(subDataSet1)\n",
+    "                if newGiniIndex<bestSplitGini:\n",
+    "                    bestSplitGini=newGiniIndex\n",
+    "                    bestSplit=j\n",
+    "            #用字典记录当前特征的最佳划分点\n",
+    "            bestSplitDict[labels[i]]=splitList[bestSplit]\n",
+    "            GiniIndex=bestSplitGini\n",
+    "        #对离散型特征进行处理\n",
+    "        else:\n",
+    "            uniqueVals=set(featList)\n",
+    "            newGiniIndex=0.0\n",
+    "            #计算该特征下每种划分的信息熵\n",
+    "            for value in uniqueVals:\n",
+    "                subDataSet=splitdataset(dataset,i,value)\n",
+    "                prob=len(subDataSet)/float(len(dataset))\n",
+    "                newGiniIndex+=prob*calcGini(subDataSet)\n",
+    "            GiniIndex=newGiniIndex\n",
+    "        if GiniIndex>bestGiniIndex:\n",
+    "            bestGiniIndex=GiniIndex\n",
+    "            bestFeature=i\n",
+    "    #若当前节点的最佳划分特征为连续特征，则将其以之前记录的划分点为界进行二值化处理\n",
+    "    #即是否小于等于bestSplitValue\n",
+    "    if type(dataset[0][bestFeature]).__name__=='float' or type(dataset[0][bestFeature]).__name__=='int':      \n",
+    "        bestSplitValue=bestSplitDict[labels[bestFeature]]        \n",
+    "        labels[bestFeature]=labels[bestFeature]+'<='+str(bestSplitValue)\n",
+    "        for i in range(shape(dataset)[0]):\n",
+    "            if dataset[i][bestFeature]<=bestSplitValue:\n",
+    "                dataset[i][bestFeature]=1\n",
+    "            else:\n",
+    "                dataset[i][bestFeature]=0\n",
+    "    return bestFeature"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "df5c61a9",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def majorityCnt(classList):\n",
+    "    classCount={}\n",
+    "    for vote in classList:\n",
+    "        if vote not in classCount.keys():\n",
+    "            classCount[vote]=0\n",
+    "        classCount[vote]+=1\n",
+    "    return max(classCount)\n",
+    " "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "e68e139c",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#主程序，递归产生决策树\n",
+    "def createTree(dataSet,labels,data_full,labels_full):\n",
+    "    classList=[example[-1] for example in dataSet]\n",
+    "    if classList.count(classList[0])==len(classList):\n",
+    "        return classList[0]\n",
+    "    if len(dataSet[0])==1:\n",
+    "        return majorityCnt(classList)\n",
+    "    bestFeat=chooseBestFeatureToSplit(dataSet,labels)\n",
+    "    bestFeatLabel=labels[bestFeat]\n",
+    "    myTree={bestFeatLabel:{}}\n",
+    "    featValues=[example[bestFeat] for example in dataSet]\n",
+    "    uniqueVals=set(featValues)\n",
+    "    if type(dataSet[0][bestFeat]).__name__=='str':\n",
+    "        currentlabel=labels_full.index(labels[bestFeat])\n",
+    "        featValuesFull=[example[currentlabel] for example in data_full]\n",
+    "        uniqueValsFull=set(featValuesFull)\n",
+    "    del(labels[bestFeat])\n",
+    "    #针对bestFeat的每个取值，划分出一个子树。\n",
+    "    for value in uniqueVals:\n",
+    "        subLabels=labels[:]\n",
+    "        if type(dataSet[0][bestFeat]).__name__=='str':\n",
+    "            uniqueValsFull.remove(value)\n",
+    "        myTree[bestFeatLabel][value]=createTree(splitdataset(dataSet,bestFeat,value),subLabels,data_full,labels_full)\n",
+    "    if type(dataSet[0][bestFeat]).__name__=='str':\n",
+    "        for value in uniqueValsFull:\n",
+    "            myTree[bestFeatLabel][value]=majorityCnt(classList)\n",
+    "    return myTree"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "id": "cd9fff66",
+   "metadata": {},
+   "outputs": [
+    {
+     "ename": "UnboundLocalError",
+     "evalue": "local variable 'newEntropy' referenced before assignment",
+     "output_type": "error",
+     "traceback": [
+      "\u001b[1;31m---------------------------------------------------------------------------\u001b[0m",
+      "\u001b[1;31mUnboundLocalError\u001b[0m                         Traceback (most recent call last)",
+      "\u001b[1;32m<ipython-input-9-0409b51cc06b>\u001b[0m in \u001b[0;36m<module>\u001b[1;34m\u001b[0m\n\u001b[0;32m      4\u001b[0m \u001b[0mlabels\u001b[0m \u001b[1;33m=\u001b[0m \u001b[0mdf\u001b[0m\u001b[1;33m.\u001b[0m\u001b[0mcolumns\u001b[0m\u001b[1;33m.\u001b[0m\u001b[0mvalues\u001b[0m\u001b[1;33m[\u001b[0m\u001b[1;36m1\u001b[0m\u001b[1;33m:\u001b[0m\u001b[1;33m-\u001b[0m\u001b[1;36m1\u001b[0m\u001b[1;33m]\u001b[0m\u001b[1;33m.\u001b[0m\u001b[0mtolist\u001b[0m\u001b[1;33m(\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n\u001b[0;32m      5\u001b[0m \u001b[0mlabels_full\u001b[0m \u001b[1;33m=\u001b[0m \u001b[0mlabels\u001b[0m\u001b[1;33m[\u001b[0m\u001b[1;33m:\u001b[0m\u001b[1;33m]\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n\u001b[1;32m----> 6\u001b[1;33m \u001b[0mmyTree\u001b[0m \u001b[1;33m=\u001b[0m \u001b[0mcreateTree\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0mdata\u001b[0m\u001b[1;33m,\u001b[0m \u001b[0mlabels\u001b[0m\u001b[1;33m,\u001b[0m \u001b[0mdata_full\u001b[0m\u001b[1;33m,\u001b[0m \u001b[0mlabels_full\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n\u001b[0m\u001b[0;32m      7\u001b[0m \u001b[0mmyTree\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n",
+      "\u001b[1;32m<ipython-input-8-7ab415b69cc9>\u001b[0m in \u001b[0;36mcreateTree\u001b[1;34m(dataSet, labels, data_full, labels_full)\u001b[0m\n\u001b[0;32m      6\u001b[0m     \u001b[1;32mif\u001b[0m \u001b[0mlen\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0mdataSet\u001b[0m\u001b[1;33m[\u001b[0m\u001b[1;36m0\u001b[0m\u001b[1;33m]\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m==\u001b[0m\u001b[1;36m1\u001b[0m\u001b[1;33m:\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n\u001b[0;32m      7\u001b[0m         \u001b[1;32mreturn\u001b[0m \u001b[0mmajorityCnt\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0mclassList\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n\u001b[1;32m----> 8\u001b[1;33m     \u001b[0mbestFeat\u001b[0m\u001b[1;33m=\u001b[0m\u001b[0mchooseBestFeatureToSplit\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0mdataSet\u001b[0m\u001b[1;33m,\u001b[0m\u001b[0mlabels\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n\u001b[0m\u001b[0;32m      9\u001b[0m     \u001b[0mbestFeatLabel\u001b[0m\u001b[1;33m=\u001b[0m\u001b[0mlabels\u001b[0m\u001b[1;33m[\u001b[0m\u001b[0mbestFeat\u001b[0m\u001b[1;33m]\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n\u001b[0;32m     10\u001b[0m     \u001b[0mmyTree\u001b[0m\u001b[1;33m=\u001b[0m\u001b[1;33m{\u001b[0m\u001b[0mbestFeatLabel\u001b[0m\u001b[1;33m:\u001b[0m\u001b[1;33m{\u001b[0m\u001b[1;33m}\u001b[0m\u001b[1;33m}\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n",
+      "\u001b[1;32m<ipython-input-6-aeec0c3a8dd9>\u001b[0m in \u001b[0;36mchooseBestFeatureToSplit\u001b[1;34m(dataset, labels)\u001b[0m\n\u001b[0;32m     25\u001b[0m                 \u001b[0msubDataSet1\u001b[0m\u001b[1;33m=\u001b[0m\u001b[0msplitContinuousDataSet\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0mdataset\u001b[0m\u001b[1;33m,\u001b[0m\u001b[0mi\u001b[0m\u001b[1;33m,\u001b[0m\u001b[0mvalue\u001b[0m\u001b[1;33m,\u001b[0m\u001b[1;36m1\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n\u001b[0;32m     26\u001b[0m                 \u001b[0mprob0\u001b[0m\u001b[1;33m=\u001b[0m\u001b[0mlen\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0msubDataSet0\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m/\u001b[0m\u001b[0mfloat\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0mlen\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0mdataset\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n\u001b[1;32m---> 27\u001b[1;33m                 \u001b[0mnewEntropy\u001b[0m\u001b[1;33m+=\u001b[0m\u001b[0mprob0\u001b[0m\u001b[1;33m*\u001b[0m\u001b[0mcalshannonEnt\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0msubDataSet0\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n\u001b[0m\u001b[0;32m     28\u001b[0m                 \u001b[0mprob1\u001b[0m\u001b[1;33m=\u001b[0m\u001b[0mlen\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0msubDataSet1\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m/\u001b[0m\u001b[0mfloat\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0mlen\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0mdataset\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n\u001b[0;32m     29\u001b[0m                 \u001b[0mnewGiniIndex\u001b[0m\u001b[1;33m+=\u001b[0m\u001b[0mprob1\u001b[0m\u001b[1;33m*\u001b[0m\u001b[0mcalcGini\u001b[0m\u001b[1;33m(\u001b[0m\u001b[0msubDataSet1\u001b[0m\u001b[1;33m)\u001b[0m\u001b[1;33m\u001b[0m\u001b[1;33m\u001b[0m\u001b[0m\n",
+      "\u001b[1;31mUnboundLocalError\u001b[0m: local variable 'newEntropy' referenced before assignment"
+     ]
+    }
+   ],
+   "source": [
+    "df = pd.read_csv(\"watermelon.csv\")\n",
+    "data = df.values[:,1:].tolist()\n",
+    "data_full = data[:]\n",
+    "labels = df.columns.values[1:-1].tolist()\n",
+    "labels_full = labels[:]\n",
+    "myTree = createTree(data, labels, data_full, labels_full)\n",
+    "myTree"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "baa291f5",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import matplotlib.pyplot as plt\n",
+    "decisionNode=dict(boxstyle=\"sawtooth\",fc=\"0.8\")\n",
+    "leafNode=dict(boxstyle=\"round4\",fc=\"0.8\")\n",
+    "arrow_args=dict(arrowstyle=\"<-\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "b262d9af",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#计算树的叶子节点数量\n",
+    "def getNumLeafs(myTree):\n",
+    "    numLeafs=0\n",
+    "    firstStr=list(myTree.keys())[0]\n",
+    "    secondDict=myTree[firstStr]\n",
+    "    for key in secondDict.keys():\n",
+    "        if type(secondDict[key]).__name__=='dict':\n",
+    "            numLeafs+=getNumLeafs(secondDict[key])\n",
+    "        else: numLeafs+=1\n",
+    "    return numLeafs\n",
+    " \n",
+    "#计算树的最大深度\n",
+    "def getTreeDepth(myTree):\n",
+    "    maxDepth=0\n",
+    "    firstStr=list(myTree.keys())[0]\n",
+    "    secondDict=myTree[firstStr]\n",
+    "    for key in secondDict.keys():\n",
+    "        if type(secondDict[key]).__name__=='dict':\n",
+    "            thisDepth=1+getTreeDepth(secondDict[key])\n",
+    "        else: thisDepth=1\n",
+    "        if thisDepth>maxDepth:\n",
+    "            maxDepth=thisDepth\n",
+    "    return maxDepth"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "aa2583a2",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def plotNode(nodeTxt,centerPt,parentPt,nodeType):\n",
+    "    createPlot.ax1.annotate(nodeTxt,xy=parentPt,xycoords='axes fraction',\\\n",
+    "    xytext=centerPt,textcoords='axes fraction',va=\"center\", ha=\"center\",\\\n",
+    "    bbox=nodeType,arrowprops=arrow_args)\n",
+    "\n",
+    "def plotMidText(cntrPt,parentPt,txtString):\n",
+    "    lens=len(txtString)\n",
+    "    xMid=(parentPt[0]+cntrPt[0])/2.0-lens*0.002\n",
+    "    yMid=(parentPt[1]+cntrPt[1])/2.0\n",
+    "    createPlot.ax1.text(xMid,yMid,txtString)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "b98850b0",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def plotTree(myTree,parentPt,nodeTxt):\n",
+    "    numLeafs=getNumLeafs(myTree)\n",
+    "    depth=getTreeDepth(myTree)\n",
+    "    firstStr=list(myTree.keys())[0]\n",
+    "    cntrPt=(plotTree.x0ff+(1.0+float(numLeafs))/2.0/plotTree.totalW,plotTree.y0ff)\n",
+    "    plotMidText(cntrPt,parentPt,nodeTxt)\n",
+    "    plotNode(firstStr,cntrPt,parentPt,decisionNode)\n",
+    "    secondDict=myTree[firstStr]\n",
+    "    plotTree.y0ff=plotTree.y0ff-1.0/plotTree.totalD\n",
+    "    for key in secondDict.keys():\n",
+    "        if type(secondDict[key]).__name__=='dict':\n",
+    "            plotTree(secondDict[key],cntrPt,str(key))\n",
+    "        else:\n",
+    "            plotTree.x0ff=plotTree.x0ff+1.0/plotTree.totalW\n",
+    "            plotNode(secondDict[key],(plotTree.x0ff,plotTree.y0ff),cntrPt,leafNode)\n",
+    "            plotMidText((plotTree.x0ff,plotTree.y0ff),cntrPt,str(key))\n",
+    "    plotTree.y0ff=plotTree.y0ff+1.0/plotTree.totalD"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "d9e67549",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def createPlot(inTree):\n",
+    "    fig=plt.figure(1,facecolor='white')\n",
+    "    fig.clf()\n",
+    "    axprops=dict(xticks=[],yticks=[])\n",
+    "    createPlot.ax1=plt.subplot(111,frameon=False,**axprops)\n",
+    "    plotTree.totalW=float(getNumLeafs(inTree))\n",
+    "    plotTree.totalD=float(getTreeDepth(inTree))\n",
+    "    plotTree.x0ff=-0.5/plotTree.totalW\n",
+    "    plotTree.y0ff=1.0\n",
+    "    plotTree(inTree,(0.5,1.0),'')\n",
+    "    plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "47f2736d",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "createPlot(myTree)"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.8"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
